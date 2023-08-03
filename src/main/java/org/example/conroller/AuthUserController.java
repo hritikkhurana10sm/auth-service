@@ -4,12 +4,15 @@ import jakarta.transaction.Transactional;
 import org.example.Dto.*;
 import org.example.Exception.AuthException;
 import org.example.generics.Constants;
+import org.example.generics.Response;
 import org.example.model.AuthUser;
 import org.example.model.UserModel;
 import org.example.repository.UserRepository;
+import org.example.service.AuthUserService;
 import org.example.util.JwtUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -31,127 +34,70 @@ import java.util.UUID;
 
 @RestController
 public class AuthUserController {
-    @Autowired
-    AuthenticationManager authenticationManager;
 
     @Autowired
-    PasswordEncoder passwordEncoder;
-
-    @Autowired
-    JwtUtils jwtUtils;
-
-    @Autowired
-    UserRepository userRepository;
+    AuthUserService authUserService;
 
     @Value("${parking.app.reset-uri}")
     private String resetUri;
 
     @GetMapping("/users")
     List<AuthUser> getUsers(){
-        return  userRepository.findAll();
+        return  authUserService.getUsers();
     }
 
     @PostMapping(value = "/signin", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<?> authenticateUser( @RequestBody MultiValueMap<String, Object> encodedSigninData) throws UnsupportedEncodingException {
-        LoginRequest loginRequest = new LoginRequest();
-        if (encodedSigninData.containsKey("username") && encodedSigninData.containsKey("password") && encodedSigninData.get("username").size() == 1 && encodedSigninData.get("password").size() == 1) {
-            loginRequest.setUsername(encodedSigninData.get("username").get(0).toString());
-            loginRequest.setPassword(encodedSigninData.get("password").get(0).toString());
-        } else {
-            throw new AuthException(Constants.UNPROCESSABLE_REQUEST, HttpStatus.UNPROCESSABLE_ENTITY);
-        }
-        UserModel authUser = (UserModel) authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword())).getPrincipal();
-
-        final String jwt = jwtUtils.generateToken(authUser);
-
-        return ResponseEntity.ok(new AuthenticationResponse(jwt));
+    public ResponseEntity<Response<String >> authenticateUser( @RequestBody MultiValueMap<String, Object> encodedSigninData){
+        String accessToken = authUserService.signin(encodedSigninData);
+        List<String> messages = new ArrayList<>();
+        messages.add(Constants.LOGIN_SUCCESSFULLY);
+        Response<String> response = new Response<>(accessToken, messages);
+        return new ResponseEntity<>(response, HttpStatus.OK);
     }
 
     @PostMapping("/signup")
-    public ResponseEntity<ApiResponse> registerUser(@RequestBody SignupRequest signUpRequest) throws AuthException {
+    public ResponseEntity<Response<Void>> registerUser(@RequestBody SignupRequest signUpRequest){
 
-        List<String> errors = new ArrayList<>();
-        String username = signUpRequest.getUsername();
-        String password = signUpRequest.getPassword();
-        String email = signUpRequest.getEmail();
-        if (username == null) {
-            errors.add(Constants.EMPTY_USERNAME);
+        try{
+            authUserService.signup(signUpRequest);
+            List<String> messages = new ArrayList<>();
+            messages.add(Constants.USER_REGISTERED);
+            Response<Void> response = new Response<>(null, messages);
+            return new ResponseEntity<>(response, HttpStatus.OK);
         }
-        if (password == null) {
-            errors.add(Constants.EMPTY_PASSWORD);
+        catch (DataIntegrityViolationException ex) {
+            throw new AuthException(ex.getMostSpecificCause().getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
         }
-        if (email == null) {
-            errors.add(Constants.EMPTY_EMAIL);
-        }
-        if (!errors.isEmpty()) {
-            throw new AuthException(errors, HttpStatus.BAD_REQUEST);
-        }
-        if (userRepository.existsByUsername(signUpRequest.getUsername())) {
-            throw new AuthException(Constants.NOTUNIQUE_USERNAME, HttpStatus.UNPROCESSABLE_ENTITY);
-        }
-        if (userRepository.existsByEmail(signUpRequest.getEmail())) {
-            throw new AuthException(Constants.NOTUNIQUE_EMAIL, HttpStatus.UNPROCESSABLE_ENTITY);
-        }
-        signUpRequest.setPassword(passwordEncoder.encode(signUpRequest.getPassword()));
-        LocalDateTime registerTime = LocalDateTime.now();
-        userRepository.save(new AuthUser(UUID.randomUUID().toString(), signUpRequest.getUsername(), signUpRequest.getPassword(), signUpRequest.getEmail(), UUID.randomUUID().toString(), registerTime, null));
-        return ResponseEntity.ok(new ApiResponse(true, "User registered successfully"));
     }
 
     @PutMapping("/signup/{userId}/activate/{activationId}")
     public  ResponseEntity<?> activateUser(@PathVariable String userId,@PathVariable String activationId) throws AuthException {
-        AuthUser registeredUser = userRepository.findById(userId).orElseThrow(() -> new AuthException(Constants.USER_NOTFOUND, HttpStatus.NOT_FOUND));
-        if (registeredUser.getActivationId() == null || registeredUser.getActivationId().isEmpty()) {
-            throw new AuthException(Constants.OLD_ACTIVATION, HttpStatus.BAD_REQUEST);
-        }
-        if (!Objects.equals(activationId, registeredUser.getActivationId())) {
-            throw new AuthException(Constants.ACCESS_DENIED, HttpStatus.UNAUTHORIZED);
-        }
-        registeredUser.setActivationId(null);
-        userRepository.save(registeredUser);
-        return ResponseEntity.ok(new ApiResponse(true,"User activated successfully"));
+
+        authUserService.activateUser(userId, activationId);
+        List<String> messages = new ArrayList<>();
+        messages.add(Constants.USER_ACTIVATED);
+        Response<Void> response = new Response<>(null, messages);
+        return new ResponseEntity<>(response, HttpStatus.OK);
     }
 
     @PostMapping("/reset-password/initiate")
-    public  ResponseEntity<?> initiateResetPassword(@RequestBody String usernameOrEmail) {
-        AuthUser authUser = userRepository.findByUsernameOrEmail(usernameOrEmail);
-        if (authUser == null) {
-            throw new UsernameNotFoundException("username or email not found");
-        }
-        authUser.setResetId(UUID.randomUUID().toString());
-        userRepository.save(authUser);
-        String uriToBeEmail=resetUri.replace("{userId}", authUser.getId()).replace("{resetId}",authUser.getResetId());
-        //TODO:send email having uriToBeEmail
-        System.out.println(uriToBeEmail);
-        return ResponseEntity.ok(new ApiResponse(true,"Email has been sent to reistered email address"));
+    public  ResponseEntity<Response<Void>> initiateResetPassword(@RequestBody String usernameOrEmail) {
+        authUserService.initiateResetPassword(usernameOrEmail);
+        List<String> messages = new ArrayList<>();
+        messages.add("Email have been sent to registered email-address");
+        Response<Void> response = new Response<>(null, messages);
+        return new ResponseEntity<>(response, HttpStatus.OK);
+
     }
 
     @PostMapping("/reset-password/user/{userId}/reset/{resetId}")
-    ResponseEntity<?> resetPassword(@PathVariable("userId") String userId, @PathVariable("resetId") String resetId, @RequestBody ResetPasswordRequest resetPasswordDto){
-        if (resetPasswordDto.getNewPassword()==null || resetPasswordDto.getConfirmPassword()==null) {
-            throw new AuthException(Constants.UNPROCESSABLE_REQUEST, HttpStatus.UNPROCESSABLE_ENTITY);
-        }
-        List<String> errors = new ArrayList<>();
-        if (!Objects.equals(resetPasswordDto.getNewPassword(), resetPasswordDto.getConfirmPassword())) {
-            errors.add(Constants.UNCONFIRMED_PASSWORD);
-        }
-        if (!errors.isEmpty()) {
-            throw new AuthException(errors, HttpStatus.BAD_REQUEST);
-        }
-        AuthUser userInDb = userRepository.findById(userId).orElseThrow(() -> new AuthException(Constants.USER_NOTFOUND, HttpStatus.NOT_FOUND));
-        if(!Objects.equals(userInDb.getResetId(), resetId)){
-            throw new AuthException(Constants.USER_NOTFOUND,HttpStatus.NOT_FOUND);
-        }
-        userInDb.setPassword(passwordEncoder.encode(resetPasswordDto.getNewPassword()));
-        userInDb.setResetId(null);
-        userRepository.save(userInDb);
-        return ResponseEntity.ok(new ApiResponse(true,"Password reset successfully"));
+    ResponseEntity<Response<Void>> resetPassword(@PathVariable("userId") String userId, @PathVariable("resetId") String resetId, @RequestBody ResetPasswordRequest resetPasswordDto){
+        this.authUserService.resetPassword(userId, resetId, resetPasswordDto);
+        List<String> messages = new ArrayList<>();
+        messages.add("Password Reset Successfully");
+        return new ResponseEntity<>(new Response<>(null, messages), HttpStatus.OK);
     }
 
-    @Transactional
-    @Scheduled(cron = "0 * * * * *")
-    public void deleteExpiredUsers() {
-        userRepository.deleteByRegisterTimeBefore(LocalDateTime.now().minusMinutes(15));
-    }
+
 
 }
