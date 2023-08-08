@@ -2,10 +2,11 @@ package org.example.service;
 
 
 import jakarta.transaction.Transactional;
-import org.example.Dto.LoginRequest;
-import org.example.Dto.ResetPasswordRequest;
-import org.example.Dto.SignupRequest;
+import org.example.dto.LoginRequest;
+import org.example.dto.ResetPasswordRequest;
+import org.example.dto.SignupDto;
 import org.example.Exception.AuthException;
+import org.example.dao.AuthUserService;
 import org.example.generics.Constants;
 import org.example.model.AuthUser;
 import org.example.model.UserModel;
@@ -23,6 +24,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MultiValueMap;
 
+import java.io.UnsupportedEncodingException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,7 +32,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 @Service
-public class AuthUserService {
+public class AuthUserServiceImpl implements AuthUserService {
 
     @Autowired
     UserRepository userRepository;
@@ -47,11 +49,12 @@ public class AuthUserService {
     @Value("${parking.app.reset-uri}")
     private String resetUri;
 
-    public void signup(SignupRequest signupRequest){
+    @Override
+    public void signup(SignupDto signupDto) {
         List<String> errors = new ArrayList<>();
-        String username = signupRequest.getUsername();
-        String password = signupRequest.getPassword();
-        String email = signupRequest.getEmail();
+        String username = signupDto.getUsername();
+        String password = signupDto.getPassword();
+        String email = signupDto.getEmail();
         if (username == null) {
             errors.add(Constants.EMPTY_USERNAME);
         }
@@ -64,19 +67,22 @@ public class AuthUserService {
         if (!errors.isEmpty()) {
             throw new AuthException(errors, HttpStatus.BAD_REQUEST);
         }
-        if (userRepository.existsByUsername(signupRequest.getUsername())) {
+        if (userRepository.existsByUsername(signupDto.getUsername())) {
             throw new AuthException(Constants.NOTUNIQUE_USERNAME, HttpStatus.UNPROCESSABLE_ENTITY);
         }
-        if (userRepository.existsByEmail(signupRequest.getEmail())) {
+        if (userRepository.existsByEmail(signupDto.getEmail())) {
             throw new AuthException(Constants.NOTUNIQUE_EMAIL, HttpStatus.UNPROCESSABLE_ENTITY);
         }
-        signupRequest.setPassword(passwordEncoder.encode(signupRequest.getPassword()));
+        if (!Objects.equals(signupDto.getPassword(), signupDto.getConfirmPassword())) {
+            throw new AuthException(Constants.UNCONFIRMED_PASSWORD, HttpStatus.UNPROCESSABLE_ENTITY);
+        }
+        signupDto.setPassword(passwordEncoder.encode(signupDto.getPassword()));
         LocalDateTime registerTime = LocalDateTime.now();
-        userRepository.save(new AuthUser(UUID.randomUUID().toString(), signupRequest.getUsername(), signupRequest.getPassword(), signupRequest.getEmail(), UUID.randomUUID().toString(), registerTime, null));
-
+        userRepository.save(new AuthUser(UUID.randomUUID().toString(), signupDto.getUsername(), signupDto.getPassword(), signupDto.getEmail(), signupDto.getName(), UUID.randomUUID().toString(), registerTime, null));
     }
 
-    public String signin(MultiValueMap<String, Object> encodedSigninData){
+    @Override
+    public String signin(MultiValueMap<String, Object> encodedSigninData) throws UnsupportedEncodingException {
         LoginRequest loginRequest = new LoginRequest();
         if (encodedSigninData.containsKey("username") && encodedSigninData.containsKey("password") && encodedSigninData.get("username").size() == 1 && encodedSigninData.get("password").size() == 1) {
             loginRequest.setUsername(encodedSigninData.get("username").get(0).toString());
@@ -102,9 +108,9 @@ public class AuthUserService {
         } catch (AuthenticationException ex) {
             throw new AuthException(Constants.INVALID_CREDENTIALS, HttpStatus.FORBIDDEN);
         }
-
     }
 
+    @Override
     public void activateUser(String userId, String activationId) {
         AuthUser registeredUser = userRepository.findById(userId).orElseThrow(() -> new AuthException(Constants.USER_NOTFOUND, HttpStatus.NOT_FOUND));
         if (registeredUser.getActivationId() == null || registeredUser.getActivationId().isEmpty()) {
@@ -115,8 +121,9 @@ public class AuthUserService {
         }
         registeredUser.setActivationId(null);
         userRepository.save(registeredUser);
-
     }
+
+    @Override
     public void initiateResetPassword(String usernameOrEmail) {
         AuthUser authUser = userRepository.findByUsernameOrEmail(usernameOrEmail);
         if (authUser == null) {
@@ -129,6 +136,7 @@ public class AuthUserService {
         System.out.println(uriToBeEmail);
     }
 
+    @Override
     public void resetPassword(String userId, String resetId, ResetPasswordRequest resetPasswordDto) {
         if (resetPasswordDto.getNewPassword()==null || resetPasswordDto.getConfirmPassword()==null) {
             throw new AuthException(Constants.UNPROCESSABLE_REQUEST, HttpStatus.UNPROCESSABLE_ENTITY);
@@ -147,10 +155,7 @@ public class AuthUserService {
         userInDb.setPassword(passwordEncoder.encode(resetPasswordDto.getNewPassword()));
         userInDb.setResetId(null);
         userRepository.save(userInDb);
-    }
 
-    public List<AuthUser> getUsers() {
-        return userRepository.findAll();
     }
 
     @Transactional

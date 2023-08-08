@@ -26,6 +26,8 @@ public class AuthUser {
 
     private String email;
 
+    private String name;
+
     private String activationId;
 
     private LocalDateTime registerTime;

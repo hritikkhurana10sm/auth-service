@@ -1,17 +1,16 @@
-package org.example.Dto;
+package org.example.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
 
 @Data
 @AllArgsConstructor
-@NoArgsConstructor
-public class LoginRequest implements Serializable {
-
+public class SignupDto implements Serializable {
     private String username;
-
+    private String email;
+    private String name;
     private String password;
+    private String confirmPassword;
 }

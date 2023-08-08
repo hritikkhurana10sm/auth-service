@@ -20,15 +20,13 @@ public interface UserRepository extends JpaRepository<AuthUser,String> {
 
     List<AuthUser> findAll();
 
-    void deleteByRegisterTimeBefore(LocalDateTime time);
-
 
     @Query("SELECT u from AuthUser u WHERE (u.username = :usernameOrEmail OR u.email = :usernameOrEmail)")
     AuthUser findByUsernameOrEmail(@Param("usernameOrEmail") String usernameOrEmail);
 
     @Modifying
     @Query("DELETE from AuthUser u WHERE (u.activationId IS NOT NULL OR u.activationId != '') AND u.registerTime < :currentTimeFifteenMinAgo")
-    void deleteExpiredUsers(@Param("currentTimeFifteenMinAgo") LocalDateTime currentTimeFifteenMinAgo);
+    void deleteByRegisterTimeBefore(@Param("currentTimeFifteenMinAgo") LocalDateTime currentTimeFifteenMinAgo);
 
 
 }
