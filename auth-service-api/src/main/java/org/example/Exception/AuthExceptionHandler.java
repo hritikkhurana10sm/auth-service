@@ -10,7 +10,7 @@ import java.time.ZonedDateTime;
 public class AuthExceptionHandler {
 
     @ExceptionHandler({AuthException.class})
-    public ResponseEntity<Object> handleAuthException( AuthException ex){
+    public ResponseEntity<Object> handleAuthException(AuthException ex){
         AuthExceptionModel apiExceptionModel=new AuthExceptionModel(
                 ZonedDateTime.now(),
                 ex.getHttpStatus(),
